@@ -204,4 +204,5 @@ After receiving Gemini's response:
 ## Notes
 
 - The wrappers live inside this skill, so the skill remains portable and independent from `gemini_mcp`.
+- Optional environment variables and detailed wrapper documentation are in [references/gemini-cli.md](references/gemini-cli.md).
 - For advanced Gemini CLI features, run `gemini <command>` directly: `gemini extensions list`, `gemini skills list`, `gemini hooks list`.
