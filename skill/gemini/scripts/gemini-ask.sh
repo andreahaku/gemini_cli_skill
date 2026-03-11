@@ -19,10 +19,13 @@ Options:
   --model <model>              Specify model
   --yolo                       YOLO mode (auto-approve all)
   --plan                       Read-only (plan) mode
+  --fast                       Use Flash model for quick, low-latency responses
+  --deep                       Use Pro model with max reasoning for complex analysis
+  --structured                 Request JSON-structured output for cross-model chaining
   -h, --help                   Show this help
 
 Environment (used as defaults, CLI flags take precedence):
-  GEMINI_SKILL_MODEL           Default model
+  GEMINI_SKILL_MODEL           Default model (default: auto → Gemini 3.1 Pro)
   GEMINI_SKILL_APPROVAL        Default approval policy
 
 You can also pipe a prompt on stdin.
@@ -41,6 +44,7 @@ prompt=""
 has_prompt=0
 model_set_by_cli=0
 approval_set_by_cli=0
+structured=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -74,6 +78,20 @@ while [[ $# -gt 0 ]]; do
       approval_set_by_cli=1
       shift
       ;;
+    --fast)
+      model="gemini-2.5-flash"
+      model_set_by_cli=1
+      shift
+      ;;
+    --deep)
+      model="pro"
+      model_set_by_cli=1
+      shift
+      ;;
+    --structured)
+      structured=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -105,14 +123,39 @@ if [[ $has_prompt -eq 0 ]]; then
 fi
 
 if [[ $has_prompt -eq 0 ]]; then
-  # If no prompt provided, just launch interactive Gemini if no arguments,
-  # or error if there were some arguments
   if [[ ${#args[@]} -gt 1 ]]; then
      echo "Error: No prompt provided." >&2
      usage
      exit 2
   fi
   exec gemini
+fi
+
+# Wrap prompt for structured output if requested
+if [[ "${structured}" -eq 1 ]]; then
+  prompt="You MUST respond with valid JSON only. Use this exact schema:
+{
+  \"findings\": [
+    {
+      \"id\": \"<short-id>\",
+      \"severity\": \"high|medium|low|info\",
+      \"category\": \"bug|security|performance|architecture|style|missing\",
+      \"file\": \"<file path or null>\",
+      \"line\": <line number or null>,
+      \"title\": \"<one-line summary>\",
+      \"detail\": \"<explanation>\",
+      \"recommendation\": \"<suggested fix or action>\",
+      \"confidence\": \"high|medium|low\"
+    }
+  ],
+  \"summary\": \"<2-3 sentence overview>\",
+  \"model\": \"gemini\"
+}
+
+Do not include any text outside the JSON block.
+
+Task:
+${prompt}"
 fi
 
 # Execute non-interactive

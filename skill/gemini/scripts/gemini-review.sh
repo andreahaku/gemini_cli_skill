@@ -6,13 +6,19 @@ usage() {
   cat <<'EOF'
 Usage:
   gemini-review.sh [--uncommitted] [--base <branch>] [--commit <sha>] [--title <title>] [--prompt <text>] [--plan]
+                   [--fast] [--deep] [--structured]
 
 Defaults:
   If no target is provided, the script uses --uncommitted.
   By default, reviews run in 'plan' mode (read-only) for safety.
 
+Options:
+  --fast           Use Flash model for quick reviews
+  --deep           Use Pro model with max reasoning for thorough reviews
+  --structured     Output JSON-structured findings for cross-model chaining
+
 Environment:
-  GEMINI_SKILL_MODEL     Optional model override
+  GEMINI_SKILL_MODEL     Optional model override (default: auto → Gemini 3.1 Pro)
   GEMINI_SKILL_APPROVAL  Optional approval policy override (defaults to 'plan' for reviews)
 EOF
 }
@@ -26,6 +32,8 @@ target=""
 custom_prompt=""
 approval_mode="${GEMINI_SKILL_APPROVAL:-plan}"
 approval_set_by_cli=0
+model="${GEMINI_SKILL_MODEL:-}"
+structured=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +79,18 @@ while [[ $# -gt 0 ]]; do
       approval_set_by_cli=1
       shift
       ;;
+    --fast)
+      model="gemini-2.5-flash"
+      shift
+      ;;
+    --deep)
+      model="pro"
+      shift
+      ;;
+    --structured)
+      structured=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -92,7 +112,14 @@ fi
 # Gather the diff
 diff_content=""
 if [[ "${target}" == "uncommitted" ]]; then
+  # Include both tracked changes and untracked files
   diff_content=$(git diff HEAD)
+  untracked=$(git ls-files --others --exclude-standard)
+  if [[ -n "${untracked}" ]]; then
+    for f in ${untracked}; do
+      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"$(cat "${f}" 2>/dev/null | sed 's/^/+/')"
+    done
+  fi
 elif [[ "${target}" =~ ^base: ]]; then
   base_branch="${target#base:}"
   diff_content=$(git diff "${base_branch}...HEAD")
@@ -106,14 +133,44 @@ if [[ -z "${diff_content}" ]]; then
   exit 0
 fi
 
-# Build the final prompt for Gemini
-final_prompt="Please review the following code changes and provide constructive feedback. Focus on potential bugs, security issues, performance improvements, and adherence to best practices.
+# Build the final prompt
+if [[ "${structured}" -eq 1 ]]; then
+  final_prompt="You MUST respond with valid JSON only. Use this exact schema:
+{
+  \"findings\": [
+    {
+      \"id\": \"<short-id>\",
+      \"severity\": \"high|medium|low|info\",
+      \"category\": \"bug|security|performance|architecture|style|missing\",
+      \"file\": \"<file path or null>\",
+      \"line\": <line number or null>,
+      \"title\": \"<one-line summary>\",
+      \"detail\": \"<explanation>\",
+      \"recommendation\": \"<suggested fix or action>\",
+      \"confidence\": \"high|medium|low\"
+    }
+  ],
+  \"summary\": \"<2-3 sentence overview>\",
+  \"model\": \"gemini\"
+}
+
+Do not include any text outside the JSON block.
+
+Review the following code changes. Focus on potential bugs, security issues, performance improvements, and adherence to best practices.
+${custom_prompt:+Additional instructions: ${custom_prompt}}
+
+--- START OF CHANGES ---
+${diff_content}
+--- END OF CHANGES ---"
+else
+  final_prompt="Please review the following code changes and provide constructive feedback. Focus on potential bugs, security issues, performance improvements, and adherence to best practices.
 
 ${custom_prompt:+Additional instructions: ${custom_prompt}}
 
 --- START OF CHANGES ---
 ${diff_content}
 --- END OF CHANGES ---"
+fi
 
 args=(
   --output-format
@@ -121,8 +178,8 @@ args=(
   --approval-mode "${approval_mode}"
 )
 
-if [[ -n "${GEMINI_SKILL_MODEL:-}" ]]; then
-  args+=(--model "${GEMINI_SKILL_MODEL}")
+if [[ -n "${model}" ]]; then
+  args+=(--model "${model}")
 fi
 
 exec gemini "${args[@]}" -p "${final_prompt}"
