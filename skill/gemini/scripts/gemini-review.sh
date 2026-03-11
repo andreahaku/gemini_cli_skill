@@ -24,7 +24,8 @@ fi
 
 target=""
 custom_prompt=""
-approval_mode="plan"
+approval_mode="${GEMINI_SKILL_APPROVAL:-plan}"
+approval_set_by_cli=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,10 +63,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --yolo)
       approval_mode="yolo"
+      approval_set_by_cli=1
       shift
       ;;
     --plan)
       approval_mode="plan"
+      approval_set_by_cli=1
       shift
       ;;
     -h|--help)
@@ -120,12 +123,6 @@ args=(
 
 if [[ -n "${GEMINI_SKILL_MODEL:-}" ]]; then
   args+=(--model "${GEMINI_SKILL_MODEL}")
-fi
-
-# Environment override for approval mode
-if [[ -n "${GEMINI_SKILL_APPROVAL:-}" ]]; then
-  # Use array indexing to find and replace or just add
-  args+=(--approval-mode "${GEMINI_SKILL_APPROVAL}")
 fi
 
 exec gemini "${args[@]}" -p "${final_prompt}"

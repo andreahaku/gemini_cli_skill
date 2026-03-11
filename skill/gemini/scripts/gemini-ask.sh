@@ -21,9 +21,17 @@ Options:
   --plan                       Read-only (plan) mode
   -h, --help                   Show this help
 
+Environment (used as defaults, CLI flags take precedence):
+  GEMINI_SKILL_MODEL           Default model
+  GEMINI_SKILL_APPROVAL        Default approval policy
+
 You can also pipe a prompt on stdin.
 EOF
 }
+
+# Environment variables as defaults — CLI flags override these
+model="${GEMINI_SKILL_MODEL:-}"
+approval="${GEMINI_SKILL_APPROVAL:-}"
 
 args=(
   --output-format text
@@ -31,6 +39,8 @@ args=(
 
 prompt=""
 has_prompt=0
+model_set_by_cli=0
+approval_set_by_cli=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,20 +54,24 @@ while [[ $# -gt 0 ]]; do
       ;;
     --approval)
       if [[ $# -lt 2 ]]; then echo "--approval requires value"; exit 2; fi
-      args+=(--approval-mode "$2")
+      approval="$2"
+      approval_set_by_cli=1
       shift 2
       ;;
     --model)
       if [[ $# -lt 2 ]]; then echo "--model requires value"; exit 2; fi
-      args+=(--model "$2")
+      model="$2"
+      model_set_by_cli=1
       shift 2
       ;;
     --yolo)
       args+=(--yolo)
+      approval_set_by_cli=1
       shift
       ;;
     --plan)
-      args+=(--approval-mode plan)
+      approval="plan"
+      approval_set_by_cli=1
       shift
       ;;
     -h|--help)
@@ -73,13 +87,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Environment variable overrides
-if [[ -n "${GEMINI_SKILL_MODEL:-}" ]]; then
-  args+=(--model "${GEMINI_SKILL_MODEL}")
+# Apply model and approval (env default or CLI override, never duplicated)
+if [[ -n "${model}" ]]; then
+  args+=(--model "${model}")
 fi
 
-if [[ -n "${GEMINI_SKILL_APPROVAL:-}" ]]; then
-  args+=(--approval-mode "${GEMINI_SKILL_APPROVAL}")
+if [[ -n "${approval}" ]]; then
+  args+=(--approval-mode "${approval}")
 fi
 
 # If no prompt and stdin is a pipe, read from stdin
