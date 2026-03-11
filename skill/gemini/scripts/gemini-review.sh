@@ -112,11 +112,12 @@ if [[ "${target}" == "uncommitted" ]]; then
   # Include both tracked changes and untracked files
   diff_content=$(git diff HEAD)
   while IFS= read -r -d '' f; do
-    # Skip binary files (those containing NUL bytes)
-    if file --brief --mime "${f}" 2>/dev/null | grep -q "^text/"; then
-      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"$(sed 's/^/+/' "${f}" 2>/dev/null)"
-    else
+    # Skip binary files (charset=binary catches images, archives, etc.
+    # while allowing JSON, JS, TS, XML and other non-text/* source files)
+    if file --brief --mime "${f}" 2>/dev/null | grep -q "charset=binary"; then
       diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"+[binary file]"
+    else
+      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"$(sed 's/^/+/' "${f}" 2>/dev/null)"
     fi
   done < <(git ls-files -z --others --exclude-standard)
 elif [[ "${target}" =~ ^base: ]]; then
