@@ -111,12 +111,14 @@ diff_content=""
 if [[ "${target}" == "uncommitted" ]]; then
   # Include both tracked changes and untracked files
   diff_content=$(git diff HEAD)
-  untracked=$(git ls-files --others --exclude-standard)
-  if [[ -n "${untracked}" ]]; then
-    for f in ${untracked}; do
-      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"$(cat "${f}" 2>/dev/null | sed 's/^/+/')"
-    done
-  fi
+  while IFS= read -r -d '' f; do
+    # Skip binary files (those containing NUL bytes)
+    if file --brief --mime "${f}" 2>/dev/null | grep -q "^text/"; then
+      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"$(sed 's/^/+/' "${f}" 2>/dev/null)"
+    else
+      diff_content+=$'\n'"--- /dev/null"$'\n'"+++ b/${f}"$'\n'"+[binary file]"
+    fi
+  done < <(git ls-files -z --others --exclude-standard)
 elif [[ "${target}" =~ ^base: ]]; then
   base_branch="${target#base:}"
   diff_content=$(git diff "${base_branch}...HEAD")

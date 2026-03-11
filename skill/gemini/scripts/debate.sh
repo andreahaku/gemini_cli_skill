@@ -39,7 +39,7 @@ if [[ -z "${codex_skill_dir}" ]]; then
   for candidate in \
     "${HOME}/.claude/skills/codex" \
     "${HOME}/Development/Claude/codex_mcp/skill/codex" \
-    "$(dirname "$(dirname "${gemini_skill_dir}")")/codex_mcp/skill/codex"; do
+    "$(dirname "$(dirname "$(dirname "${gemini_skill_dir}")")")/codex_mcp/skill/codex"; do
     if [[ -f "${candidate}/scripts/codex-ask.sh" ]]; then
       codex_skill_dir="${candidate}"
       break
@@ -253,13 +253,15 @@ ${critique}
 Address the points and provide your final refined analysis." "${round_file}"
 
   echo "  Saved to: ${round_file}"
-  prev_response="$(cat "${round_file}")"
+  latest_response="$(cat "${round_file}")"
   round_num=$((round_num + 1))
 
-  # Swap models for next round
+  # Swap models for next round: the responder becomes the one to be critiqued
   tmp="${current_model}"
   current_model="${prev_model}"
   prev_model="${tmp}"
+  # prev_response must track the new prev_model's latest output
+  prev_response="${latest_response}"
 done
 
 # Generate synthesis summary
