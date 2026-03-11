@@ -35,13 +35,16 @@ bash "${CLAUDE_SKILL_DIR}/scripts/gemini-ask.sh" "Analyze this architecture: $(c
 ```
 
 **Persistent Sessions:**
-Gemini CLI maintains local sessions. You can list them or resume the latest one:
+Gemini CLI maintains local sessions. You can list them or resume the latest one, or a specific one by index:
 ```bash
 # List sessions for the current project
 bash "${CLAUDE_SKILL_DIR}/scripts/gemini-ask.sh" --list
 
 # Resume the latest session
 bash "${CLAUDE_SKILL_DIR}/scripts/gemini-ask.sh" --resume latest "Now implement the suggested changes"
+
+# Resume a specific session by index
+bash "${CLAUDE_SKILL_DIR}/scripts/gemini-ask.sh" --resume 2 "Riassumi questa conversazione"
 ```
 
 **Approval Modes:**
