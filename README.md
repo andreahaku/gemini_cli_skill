@@ -15,7 +15,7 @@ A comprehensive integration for using Gemini CLI as an MCP server and an orchest
 The skill provides specialized instructions for Claude to act as an orchestrator for Gemini using the CLI directly. This approach leverages native session management and safety features.
 
 ### Key Features
-- **Native Session Management**: Resume previous conversations with Gemini using `--resume latest`.
+- **Native Session Management**: Resume previous conversations with Gemini using `--resume latest` or a specific index (e.g., `--resume 2`).
 - **Safe Planning**: Uses `--approval-mode plan` for reviews and analysis to prevent accidental changes.
 - **Independence**: Works directly with the `gemini` binary without requiring a running MCP server.
 
