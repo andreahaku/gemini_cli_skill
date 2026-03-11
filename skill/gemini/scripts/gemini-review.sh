@@ -31,7 +31,6 @@ fi
 target=""
 custom_prompt=""
 approval_mode="${GEMINI_SKILL_APPROVAL:-plan}"
-approval_set_by_cli=0
 model="${GEMINI_SKILL_MODEL:-}"
 structured=0
 
@@ -71,12 +70,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --yolo)
       approval_mode="yolo"
-      approval_set_by_cli=1
       shift
       ;;
     --plan)
       approval_mode="plan"
-      approval_set_by_cli=1
       shift
       ;;
     --fast)
@@ -129,7 +126,11 @@ elif [[ "${target}" =~ ^commit: ]]; then
 fi
 
 if [[ -z "${diff_content}" ]]; then
-  echo "No changes found to review for target: ${target}"
+  if [[ "${structured}" -eq 1 ]]; then
+    echo '{"findings":[],"summary":"No changes found to review for target: '"${target}"'","model":"gemini"}'
+  else
+    echo "No changes found to review for target: ${target}"
+  fi
   exit 0
 fi
 
@@ -172,9 +173,14 @@ ${diff_content}
 --- END OF CHANGES ---"
 fi
 
+output_fmt="text"
+if [[ "${structured}" -eq 1 ]]; then
+  output_fmt="json"
+fi
+
 args=(
   --output-format
-  text
+  "${output_fmt}"
   --approval-mode "${approval_mode}"
 )
 

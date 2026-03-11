@@ -42,9 +42,8 @@ args=(
 
 prompt=""
 has_prompt=0
-model_set_by_cli=0
-approval_set_by_cli=0
 structured=0
+has_optional_flags=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,33 +58,33 @@ while [[ $# -gt 0 ]]; do
     --approval)
       if [[ $# -lt 2 ]]; then echo "--approval requires value"; exit 2; fi
       approval="$2"
-      approval_set_by_cli=1
+      has_optional_flags=1
       shift 2
       ;;
     --model)
       if [[ $# -lt 2 ]]; then echo "--model requires value"; exit 2; fi
       model="$2"
-      model_set_by_cli=1
+      has_optional_flags=1
       shift 2
       ;;
     --yolo)
       args+=(--yolo)
-      approval_set_by_cli=1
+      has_optional_flags=1
       shift
       ;;
     --plan)
       approval="plan"
-      approval_set_by_cli=1
+      has_optional_flags=1
       shift
       ;;
     --fast)
       model="gemini-2.5-flash"
-      model_set_by_cli=1
+      has_optional_flags=1
       shift
       ;;
     --deep)
       model="pro"
-      model_set_by_cli=1
+      has_optional_flags=1
       shift
       ;;
     --structured)
@@ -123,7 +122,7 @@ if [[ $has_prompt -eq 0 ]]; then
 fi
 
 if [[ $has_prompt -eq 0 ]]; then
-  if [[ ${#args[@]} -gt 1 ]]; then
+  if [[ "${has_optional_flags}" -eq 1 ]]; then
      echo "Error: No prompt provided." >&2
      usage
      exit 2
@@ -156,6 +155,18 @@ Do not include any text outside the JSON block.
 
 Task:
 ${prompt}"
+fi
+
+# In structured mode, use JSON output format to prevent text formatter
+# from inserting newlines between assistant turns that break JSON
+if [[ "${structured}" -eq 1 ]]; then
+  # Replace --output-format text with --output-format json
+  for i in "${!args[@]}"; do
+    if [[ "${args[$i]}" == "text" && $i -gt 0 && "${args[$((i-1))]}" == "--output-format" ]]; then
+      args[$i]="json"
+      break
+    fi
+  done
 fi
 
 # Execute non-interactive
