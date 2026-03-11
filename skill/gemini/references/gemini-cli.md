@@ -84,7 +84,7 @@ Manages shared threads across Codex and Gemini. Commands:
 - `list` — list all active threads
 - `export <name>` — export context summary for prompt injection
 
-Thread names must match `^[a-zA-Z0-9_-]+$` (alphanumeric, hyphens, underscores only).
+Thread names must match `^[a-zA-Z0-9._-]+$` (alphanumeric, dots, hyphens, underscores only).
 State is stored in `~/.claude/cross-model-threads/`.
 
 ## Debate script
