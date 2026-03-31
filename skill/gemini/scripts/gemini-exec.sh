@@ -16,25 +16,35 @@ gemini_exec() {
   local args=("$@")
   local attempt=0
   local output
+  local stderr_tmp
   local exit_code
+
+  stderr_tmp="$(mktemp)"
+  trap 'rm -f "${stderr_tmp}"' RETURN
 
   # — Primary model: retry with backoff —
   while [[ $attempt -le $MAX_RETRIES ]]; do
     if [[ $attempt -gt 0 ]]; then
       local wait_time=$(( BACKOFF_BASE * attempt ))
-      echo "⏳ Rate limited (429). Retrying in ${wait_time}s... (attempt $((attempt + 1))/$((MAX_RETRIES + 1)))" >&2
+      echo "Attempt $((attempt)) failed with status 429. Retrying with backoff..." >&2
       sleep "$wait_time"
     fi
 
-    output=$(gemini "${args[@]}" 2>&1) && exit_code=0 || exit_code=$?
+    output=$(gemini "${args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
 
-    # Check if it's a 429 / rate limit error
-    if [[ $exit_code -ne 0 ]] && echo "$output" | grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota'; then
+    # Check if it's a 429 / rate limit error (check stderr, not stdout)
+    if [[ $exit_code -ne 0 ]] && grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota' "${stderr_tmp}" 2>/dev/null; then
+      cat "${stderr_tmp}" >&2
       attempt=$((attempt + 1))
       continue
     fi
 
-    # Success or non-rate-limit error — return as-is
+    # Non-rate-limit stderr goes to stderr
+    if [[ -s "${stderr_tmp}" ]]; then
+      cat "${stderr_tmp}" >&2
+    fi
+
+    # Success or non-rate-limit error — return stdout clean
     echo "$output"
     return $exit_code
   done
@@ -66,12 +76,16 @@ gemini_exec() {
     fallback_args+=(--model "$FALLBACK_MODEL")
   fi
 
-  output=$(gemini "${fallback_args[@]}" 2>&1) && exit_code=0 || exit_code=$?
+  output=$(gemini "${fallback_args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
 
-  if [[ $exit_code -ne 0 ]] && echo "$output" | grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota'; then
+  if [[ $exit_code -ne 0 ]] && grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota' "${stderr_tmp}" 2>/dev/null; then
     echo "❌ Rate limited on both primary and fallback ($FALLBACK_MODEL). Try again later." >&2
-    echo "$output"
+    cat "${stderr_tmp}" >&2
     return 1
+  fi
+
+  if [[ -s "${stderr_tmp}" ]]; then
+    cat "${stderr_tmp}" >&2
   fi
 
   echo "$output"
