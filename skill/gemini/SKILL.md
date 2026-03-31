@@ -201,6 +201,20 @@ After receiving Gemini's response:
 - `GEMINI_SKILL_MODEL`: Override the default model (default: auto → Gemini 3.1 Pro). Use CLI aliases: `pro`, `flash`, `flash-lite`.
 - `GEMINI_SKILL_APPROVAL`: Override the default approval policy.
 
+## Worker Mode (for /coordinate and multi-agent orchestration)
+
+When invoked as a worker by a coordinator skill, use `--worker --scratchpad <dir>`:
+
+```bash
+bash "/Users/administrator/.claude/skills/gemini/scripts/gemini-ask.sh" --worker --scratchpad /tmp/robottino-scratchpad/session-123 --deep --plan "Analyze the auth module architecture"
+```
+
+Worker mode behavior:
+- Output is written to `{scratchpad}/workers/gemini.md` (with frontmatter metadata) and `gemini.json` (raw)
+- `--structured` is forced on automatically (JSON findings schema)
+- No interactive output — all goes to scratchpad files
+- The coordinator reads the scratchpad to synthesize findings across workers
+
 ## Notes
 
 - The wrappers live inside this skill, so the skill remains portable and independent from `gemini_mcp`.

@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/gemini-exec.sh"
+
 if ! command -v gemini >/dev/null 2>&1; then
   echo "Gemini CLI not found. Install it first and make sure \`gemini\` is on PATH." >&2
   exit 1
@@ -22,6 +25,8 @@ Options:
   --fast                       Use Flash model for quick, low-latency responses
   --deep                       Use Pro model with max reasoning for complex analysis
   --structured                 Request JSON-structured output for cross-model chaining
+  --worker                     Worker mode: write output to scratchpad, structured by default
+  --scratchpad <dir>           Scratchpad directory for worker mode output
   -h, --help                   Show this help
 
 Environment (used as defaults, CLI flags take precedence):
@@ -44,6 +49,8 @@ prompt=""
 has_prompt=0
 structured=0
 has_optional_flags=0
+worker_mode=0
+scratchpad_dir=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -90,6 +97,18 @@ while [[ $# -gt 0 ]]; do
     --structured)
       structured=1
       shift
+      ;;
+    --worker)
+      worker_mode=1
+      structured=1
+      has_optional_flags=1
+      shift
+      ;;
+    --scratchpad)
+      if [[ $# -lt 2 ]]; then echo "--scratchpad requires a directory path" >&2; exit 2; fi
+      scratchpad_dir="$2"
+      has_optional_flags=1
+      shift 2
       ;;
     -h|--help)
       usage
@@ -169,5 +188,35 @@ if [[ "${structured}" -eq 1 ]]; then
   done
 fi
 
-# Execute non-interactive
-exec gemini "${args[@]}" -p "${prompt}"
+# Execute non-interactive with retry + fallback on 429
+if [[ "${worker_mode}" -eq 1 && -n "${scratchpad_dir}" ]]; then
+  # Worker mode: capture output and write to scratchpad
+  mkdir -p "${scratchpad_dir}/workers"
+  tmp_output="$(mktemp)"
+  trap 'rm -f "${tmp_output}"' EXIT
+
+  worker_status="completed"
+  if gemini_exec "${args[@]}" -p "${prompt}" > "${tmp_output}" 2>&1; then
+    worker_status="completed"
+  else
+    worker_status="failed"
+  fi
+
+  {
+    echo "---"
+    echo "worker: gemini"
+    echo "task: research"
+    echo "status: ${worker_status}"
+    echo "started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "model: ${model:-auto}"
+    echo "---"
+    echo ""
+    cat "${tmp_output}"
+  } > "${scratchpad_dir}/workers/gemini.md"
+  # Also write raw output for JSON parsing
+  cp "${tmp_output}" "${scratchpad_dir}/workers/gemini.json" 2>/dev/null || true
+  echo "[gemini-worker] Output written to ${scratchpad_dir}/workers/gemini.md" >&2
+else
+  gemini_exec "${args[@]}" -p "${prompt}"
+fi
