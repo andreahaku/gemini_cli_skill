@@ -102,6 +102,10 @@ while [[ $# -gt 0 ]]; do
       worker_mode=1
       structured=1
       has_optional_flags=1
+      # Force plan mode for worker safety (read-only by default)
+      if [[ -z "${approval}" ]]; then
+        approval="plan"
+      fi
       shift
       ;;
     --scratchpad)
@@ -138,6 +142,12 @@ if [[ $has_prompt -eq 0 ]]; then
     prompt="$(cat)"
     has_prompt=1
   fi
+fi
+
+# Require --scratchpad when --worker is set
+if [[ "${worker_mode}" -eq 1 && -z "${scratchpad_dir}" ]]; then
+  echo "--worker requires --scratchpad <dir>" >&2
+  exit 2
 fi
 
 if [[ $has_prompt -eq 0 ]]; then
@@ -189,14 +199,15 @@ if [[ "${structured}" -eq 1 ]]; then
 fi
 
 # Execute non-interactive with retry + fallback on 429
-if [[ "${worker_mode}" -eq 1 && -n "${scratchpad_dir}" ]]; then
-  # Worker mode: capture output and write to scratchpad
+if [[ "${worker_mode}" -eq 1 ]]; then
+  # Worker mode: capture output and always write to scratchpad (even on failure)
   mkdir -p "${scratchpad_dir}/workers"
   tmp_output="$(mktemp)"
-  trap 'rm -f "${tmp_output}"' EXIT
+  tmp_stderr="$(mktemp)"
+  trap 'rm -f "${tmp_output}" "${tmp_stderr}"' EXIT
 
   worker_status="completed"
-  if gemini_exec "${args[@]}" -p "${prompt}" > "${tmp_output}" 2>&1; then
+  if gemini_exec "${args[@]}" -p "${prompt}" > "${tmp_output}" 2>"${tmp_stderr}"; then
     worker_status="completed"
   else
     worker_status="failed"
@@ -212,10 +223,16 @@ if [[ "${worker_mode}" -eq 1 && -n "${scratchpad_dir}" ]]; then
     echo "model: ${model:-auto}"
     echo "---"
     echo ""
-    cat "${tmp_output}"
+    if [[ -s "${tmp_output}" ]]; then
+      cat "${tmp_output}"
+    elif [[ "${worker_status}" == "failed" ]]; then
+      echo "Worker failed."
+      cat "${tmp_stderr}" 2>/dev/null | tail -5 || true
+    fi
   } > "${scratchpad_dir}/workers/gemini.md"
-  # Also write raw output for JSON parsing
-  cp "${tmp_output}" "${scratchpad_dir}/workers/gemini.json" 2>/dev/null || true
+  if [[ -s "${tmp_output}" ]]; then
+    cp "${tmp_output}" "${scratchpad_dir}/workers/gemini.json" 2>/dev/null || true
+  fi
   echo "[gemini-worker] Output written to ${scratchpad_dir}/workers/gemini.md" >&2
 else
   gemini_exec "${args[@]}" -p "${prompt}"
