@@ -1,14 +1,9 @@
 ---
 name: gemini
 description: >
-  Use the local Gemini CLI for advanced reasoning, code generation, and multi-agent collaboration.
-  Invoke this skill when the user explicitly asks to consult Gemini, delegate a task to Gemini,
-  run /gemini, continue or resume a Gemini conversation, or request a Gemini review of local changes,
-  a branch, a commit, or a PR. Also use this skill when Claude decides that Gemini's strengths
-  (large context window, multimodal reasoning, grounded search, platform awareness) would complement
-  its own analysis — for instance to get a second opinion, validate an architectural decision, or
-  cross-check a complex code review. This skill is independent from any MCP server and talks
-  directly to the installed `gemini` CLI.
+  Local Gemini CLI (3.1 Pro) for large-context analysis, multimodal reasoning, architecture
+  review. Use when user says /gemini, asks to consult Gemini, or when Gemini's strengths
+  (large context, grounded search) complement Claude's analysis.
 user-invocable: true
 argument-hint: "<prompt or review request>"
 compatibility: Requires Gemini CLI installed and authenticated.
