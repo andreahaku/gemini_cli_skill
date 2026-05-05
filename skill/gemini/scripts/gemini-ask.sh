@@ -43,6 +43,7 @@ approval="${GEMINI_SKILL_APPROVAL:-}"
 
 args=(
   --output-format text
+  --skip-trust
 )
 
 prompt=""
@@ -207,27 +208,39 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   trap 'rm -f "${tmp_output}" "${tmp_stderr}"' EXIT
 
   worker_status="completed"
+  worker_exit=0
+  started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   if gemini_exec "${args[@]}" -p "${prompt}" > "${tmp_output}" 2>"${tmp_stderr}"; then
     worker_status="completed"
   else
-    worker_status="failed"
+    worker_exit=$?
+    if [[ "${worker_exit}" -eq 124 ]]; then
+      worker_status="timeout"
+    else
+      worker_status="failed"
+    fi
   fi
+  completed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
   {
     echo "---"
     echo "worker: gemini"
     echo "task: research"
     echo "status: ${worker_status}"
-    echo "started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    echo "completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "started: ${started_at}"
+    echo "completed: ${completed_at}"
     echo "model: ${model:-auto}"
+    echo "exit_code: ${worker_exit}"
     echo "---"
     echo ""
     if [[ -s "${tmp_output}" ]]; then
       cat "${tmp_output}"
+    elif [[ "${worker_status}" == "timeout" ]]; then
+      echo "Worker timed out."
+      tail -n 5 "${tmp_stderr}" 2>/dev/null || true
     elif [[ "${worker_status}" == "failed" ]]; then
       echo "Worker failed."
-      cat "${tmp_stderr}" 2>/dev/null | tail -5 || true
+      tail -n 5 "${tmp_stderr}" 2>/dev/null || true
     fi
   } > "${scratchpad_dir}/workers/gemini.md"
   if [[ -s "${tmp_output}" ]]; then

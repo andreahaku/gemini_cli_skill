@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/gemini-exec.sh"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -185,10 +188,11 @@ args=(
   --output-format
   "${output_fmt}"
   --approval-mode "${approval_mode}"
+  --skip-trust
 )
 
 if [[ -n "${model}" ]]; then
   args+=(--model "${model}")
 fi
 
-exec gemini "${args[@]}" -p "${final_prompt}"
+gemini_exec "${args[@]}" -p "${final_prompt}"

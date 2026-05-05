@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
-# gemini-exec.sh — Wrapper around `gemini` CLI with retry + fallback on 429
+# gemini-exec.sh — Wrapper around `gemini` CLI with retry + fallback on transient errors
 # Source this file, then call: gemini_exec "${args[@]}"
 #
 # Behavior:
 #   1. Run gemini with the original args
-#   2. If 429 (rate limited), retry up to 2 times with exponential backoff (3s, 6s)
+#   2. If transient error (429/capacity/unavailable/overloaded), retry up to MAX_RETRIES times
+#      with exponential backoff (3s, 6s, 9s)
 #   3. If still failing, fallback to gemini-2.5-flash and retry once
 #   4. If all attempts fail, show the error and exit 1
+#
+# Transient error patterns include:
+#   - 429 (rate limited) / 503 (service unavailable)
+#   - RESOURCE_EXHAUSTED / UNAVAILABLE gRPC status codes
+#   - "rate limit" / "quota" / "capacity" / "overloaded" / "temporarily unavailable"
+#     (per Google's April 2026 traffic prioritization changes, capacity errors during peak)
 
 FALLBACK_MODEL="gemini-2.5-flash"
-MAX_RETRIES=2
+MAX_RETRIES=3
 BACKOFF_BASE=3
+TRANSIENT_ERROR_REGEX='429|503|rate.?limit|RESOURCE_EXHAUSTED|UNAVAILABLE|quota|capacity|overloaded|temporarily.?unavailable|server.?is.?busy'
+GEMINI_DEFAULT_TIMEOUT=600
+
+# Source the shared timeout helper (closes stdin, kills hung processes).
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-with-timeout.sh"
 
 gemini_exec() {
   local args=("$@")
@@ -26,14 +39,21 @@ gemini_exec() {
   while [[ $attempt -le $MAX_RETRIES ]]; do
     if [[ $attempt -gt 0 ]]; then
       local wait_time=$(( BACKOFF_BASE * attempt ))
-      echo "Attempt $((attempt)) failed with status 429. Retrying with backoff..." >&2
+      echo "Attempt $((attempt)) failed (transient error). Retrying with backoff..." >&2
       sleep "$wait_time"
     fi
 
-    output=$(gemini "${args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
+    output=$(run_with_timeout "${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}" gemini "${args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
+
+    # 124 = timeout (GNU convention) — surface this distinctly so callers can react
+    if [[ $exit_code -eq 124 ]]; then
+      echo "[gemini-exec] timed out after ${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}s" >&2
+      if [[ -s "${stderr_tmp}" ]]; then cat "${stderr_tmp}" >&2; fi
+      return 124
+    fi
 
     # Check if it's a 429 / rate limit error (check stderr, not stdout)
-    if [[ $exit_code -ne 0 ]] && grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota' "${stderr_tmp}" 2>/dev/null; then
+    if [[ $exit_code -ne 0 ]] && grep -qiE "${TRANSIENT_ERROR_REGEX}" "${stderr_tmp}" 2>/dev/null; then
       cat "${stderr_tmp}" >&2
       attempt=$((attempt + 1))
       continue
@@ -76,9 +96,15 @@ gemini_exec() {
     fallback_args+=(--model "$FALLBACK_MODEL")
   fi
 
-  output=$(gemini "${fallback_args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
+  output=$(run_with_timeout "${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}" gemini "${fallback_args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
 
-  if [[ $exit_code -ne 0 ]] && grep -qiE '429|rate.limit|RESOURCE_EXHAUSTED|quota' "${stderr_tmp}" 2>/dev/null; then
+  if [[ $exit_code -eq 124 ]]; then
+    echo "[gemini-exec] fallback model timed out after ${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}s" >&2
+    if [[ -s "${stderr_tmp}" ]]; then cat "${stderr_tmp}" >&2; fi
+    return 124
+  fi
+
+  if [[ $exit_code -ne 0 ]] && grep -qiE "${TRANSIENT_ERROR_REGEX}" "${stderr_tmp}" 2>/dev/null; then
     echo "❌ Rate limited on both primary and fallback ($FALLBACK_MODEL). Try again later." >&2
     cat "${stderr_tmp}" >&2
     return 1
