@@ -199,6 +199,20 @@ if [[ "${structured}" -eq 1 ]]; then
   done
 fi
 
+# If the prompt exceeds the safe ARG_MAX threshold, route it via stdin instead
+# of the -p argument. gemini concatenates stdin + -p, so passing -p "" works.
+LARGE_PROMPT_THRESHOLD="${GEMINI_LARGE_PROMPT_THRESHOLD:-50000}"
+prompt_bytes=$(printf '%s' "${prompt}" | wc -c | tr -d ' ')
+prompt_arg_for_p="${prompt}"
+if (( prompt_bytes > LARGE_PROMPT_THRESHOLD )); then
+  GEMINI_STDIN_FILE="$(mktemp -t gemini-prompt.XXXXXX)"
+  printf '%s' "${prompt}" > "${GEMINI_STDIN_FILE}"
+  trap 'rm -f "${GEMINI_STDIN_FILE}"' EXIT
+  export GEMINI_STDIN_FILE
+  prompt_arg_for_p=""
+  echo "[gemini-ask] prompt size ${prompt_bytes}B > threshold ${LARGE_PROMPT_THRESHOLD}B — routing via stdin" >&2
+fi
+
 # Execute non-interactive with retry + fallback on 429
 if [[ "${worker_mode}" -eq 1 ]]; then
   # Worker mode: capture output and always write to scratchpad (even on failure)
@@ -210,7 +224,7 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   worker_status="completed"
   worker_exit=0
   started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  if gemini_exec "${args[@]}" -p "${prompt}" > "${tmp_output}" 2>"${tmp_stderr}"; then
+  if gemini_exec "${args[@]}" -p "${prompt_arg_for_p}" > "${tmp_output}" 2>"${tmp_stderr}"; then
     worker_status="completed"
   else
     worker_exit=$?
@@ -248,5 +262,5 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   fi
   echo "[gemini-worker] Output written to ${scratchpad_dir}/workers/gemini.md" >&2
 else
-  gemini_exec "${args[@]}" -p "${prompt}"
+  gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
 fi

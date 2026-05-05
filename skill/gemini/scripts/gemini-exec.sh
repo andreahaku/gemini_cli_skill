@@ -35,6 +35,13 @@ gemini_exec() {
   stderr_tmp="$(mktemp)"
   trap 'rm -f "${stderr_tmp}"' RETURN
 
+  # If the caller exported GEMINI_STDIN_FILE, route it through run_with_timeout
+  # so gemini reads large prompts from stdin (avoids ARG_MAX on big diffs).
+  local rwt_prefix=("${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}")
+  if [[ -n "${GEMINI_STDIN_FILE:-}" && -r "${GEMINI_STDIN_FILE}" ]]; then
+    rwt_prefix+=(--stdin "${GEMINI_STDIN_FILE}")
+  fi
+
   # — Primary model: retry with backoff —
   while [[ $attempt -le $MAX_RETRIES ]]; do
     if [[ $attempt -gt 0 ]]; then
@@ -43,7 +50,7 @@ gemini_exec() {
       sleep "$wait_time"
     fi
 
-    output=$(run_with_timeout "${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}" gemini "${args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
+    output=$(run_with_timeout "${rwt_prefix[@]}" gemini "${args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
 
     # 124 = timeout (GNU convention) — surface this distinctly so callers can react
     if [[ $exit_code -eq 124 ]]; then
@@ -96,7 +103,7 @@ gemini_exec() {
     fallback_args+=(--model "$FALLBACK_MODEL")
   fi
 
-  output=$(run_with_timeout "${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}" gemini "${fallback_args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
+  output=$(run_with_timeout "${rwt_prefix[@]}" gemini "${fallback_args[@]}" 2>"${stderr_tmp}") && exit_code=0 || exit_code=$?
 
   if [[ $exit_code -eq 124 ]]; then
     echo "[gemini-exec] fallback model timed out after ${GEMINI_SKILL_TIMEOUT:-$GEMINI_DEFAULT_TIMEOUT}s" >&2

@@ -195,4 +195,18 @@ if [[ -n "${model}" ]]; then
   args+=(--model "${model}")
 fi
 
-gemini_exec "${args[@]}" -p "${final_prompt}"
+# If the prompt exceeds the safe ARG_MAX threshold (mostly large diffs), route
+# it via stdin instead of -p. gemini concatenates stdin + -p, so -p "" works.
+LARGE_PROMPT_THRESHOLD="${GEMINI_LARGE_PROMPT_THRESHOLD:-50000}"
+prompt_bytes=$(printf '%s' "${final_prompt}" | wc -c | tr -d ' ')
+prompt_arg_for_p="${final_prompt}"
+if (( prompt_bytes > LARGE_PROMPT_THRESHOLD )); then
+  GEMINI_STDIN_FILE="$(mktemp -t gemini-review.XXXXXX)"
+  printf '%s' "${final_prompt}" > "${GEMINI_STDIN_FILE}"
+  trap 'rm -f "${GEMINI_STDIN_FILE}"' EXIT
+  export GEMINI_STDIN_FILE
+  prompt_arg_for_p=""
+  echo "[gemini-review] prompt size ${prompt_bytes}B > threshold ${LARGE_PROMPT_THRESHOLD}B — routing via stdin" >&2
+fi
+
+gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
