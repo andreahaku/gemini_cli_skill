@@ -4,11 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/gemini-exec.sh"
+source "${SCRIPT_DIR}/agy-exec.sh"
+source "${SCRIPT_DIR}/backend-detect.sh"
 
-if ! command -v gemini >/dev/null 2>&1; then
-  echo "Gemini CLI not found. Install it first and make sure \`gemini\` is on PATH." >&2
-  exit 1
-fi
+# Resolve backend (auto|agy|gemini). resolve_backend errors out if the chosen
+# backend's CLI is missing, so no separate `command -v` check is needed.
+backend="$(resolve_backend)" || exit 1
 
 usage() {
   cat <<'EOF'
@@ -53,14 +54,25 @@ has_optional_flags=0
 worker_mode=0
 scratchpad_dir=""
 
+# Semantic intent, backend-agnostic — translated to agy-native flags when the
+# resolved backend is agy (which lacks --resume/--yolo/--approval-mode flags).
+_resume_target=""
+_sem_yolo=0
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -r|--resume)
       if [[ $# -lt 2 ]]; then echo "--resume requires value"; exit 2; fi
       args+=(--resume "$2")
+      _resume_target="$2"
       shift 2
       ;;
     --list)
+      # Session listing is gemini-only (agy has no equivalent).
+      if ! command -v gemini >/dev/null 2>&1; then
+        echo "--list requires the legacy \`gemini\` CLI (agy has no session listing)." >&2
+        exit 1
+      fi
       exec gemini --list-sessions
       ;;
     --approval)
@@ -77,6 +89,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --yolo)
       args+=(--yolo)
+      _sem_yolo=1
       has_optional_flags=1
       shift
       ;;
@@ -137,6 +150,28 @@ if [[ -n "${approval}" ]]; then
   args+=(--approval-mode "${approval}")
 fi
 
+# Capture yolo intent coming from --approval yolo / GEMINI_SKILL_APPROVAL=yolo
+[[ "${approval}" == "yolo" ]] && _sem_yolo=1
+
+# Build agy-native args from semantic intent (used only when backend=agy).
+# agy has no --model/--output-format/--approval-mode: model is the pinned 3.5
+# default, JSON comes from the prompt instruction, plan-mode is implicit in
+# single-shot --print. Only yolo and resume need translation.
+build_agy_args() {
+  agy_args=(--print "${prompt_arg_for_p}")
+  if [[ "${_sem_yolo}" -eq 1 ]]; then
+    agy_args+=(--dangerously-skip-permissions)
+  fi
+  if [[ -n "${_resume_target}" ]]; then
+    if [[ "${_resume_target}" == "latest" ]]; then
+      agy_args+=(-c)
+    else
+      # Numeric gemini indices have no agy mapping; treat as a conversation id.
+      agy_args+=(--conversation "${_resume_target}")
+    fi
+  fi
+}
+
 # If no prompt and stdin is a pipe, read from stdin
 if [[ $has_prompt -eq 0 ]]; then
   if [[ ! -t 0 ]]; then
@@ -156,6 +191,10 @@ if [[ $has_prompt -eq 0 ]]; then
      echo "Error: No prompt provided." >&2
      usage
      exit 2
+  fi
+  # Bare invocation in a terminal → open an interactive session on the backend.
+  if [[ "${backend}" == "agy" ]]; then
+    exec agy -i ""
   fi
   exec gemini
 fi
@@ -213,6 +252,21 @@ if (( prompt_bytes > LARGE_PROMPT_THRESHOLD )); then
   echo "[gemini-ask] prompt size ${prompt_bytes}B > threshold ${LARGE_PROMPT_THRESHOLD}B — routing via stdin" >&2
 fi
 
+# Finalize agy-native args now that prompt_arg_for_p / GEMINI_STDIN_FILE are set.
+agy_args=()
+if [[ "${backend}" == "agy" ]]; then
+  build_agy_args
+fi
+
+# run_backend: dispatch to the resolved backend with the prepared args.
+run_backend() {
+  if [[ "${backend}" == "agy" ]]; then
+    agy_exec "${agy_args[@]}"
+  else
+    gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
+  fi
+}
+
 # Execute non-interactive with retry + fallback on 429
 if [[ "${worker_mode}" -eq 1 ]]; then
   # Worker mode: capture output and always write to scratchpad (even on failure)
@@ -224,7 +278,7 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   worker_status="completed"
   worker_exit=0
   started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  if gemini_exec "${args[@]}" -p "${prompt_arg_for_p}" > "${tmp_output}" 2>"${tmp_stderr}"; then
+  if run_backend > "${tmp_output}" 2>"${tmp_stderr}"; then
     worker_status="completed"
   else
     worker_exit=$?
@@ -239,11 +293,16 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   {
     echo "---"
     echo "worker: gemini"
+    echo "backend: ${backend}"
     echo "task: research"
     echo "status: ${worker_status}"
     echo "started: ${started_at}"
     echo "completed: ${completed_at}"
-    echo "model: ${model:-auto}"
+    if [[ "${backend}" == "agy" ]]; then
+      echo "model: gemini-3.5-flash"
+    else
+      echo "model: ${model:-auto}"
+    fi
     echo "exit_code: ${worker_exit}"
     echo "---"
     echo ""
@@ -262,5 +321,5 @@ if [[ "${worker_mode}" -eq 1 ]]; then
   fi
   echo "[gemini-worker] Output written to ${scratchpad_dir}/workers/gemini.md" >&2
 else
-  gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
+  run_backend
 fi

@@ -33,7 +33,9 @@ gemini_exec() {
   local exit_code
 
   stderr_tmp="$(mktemp)"
-  trap 'rm -f "${stderr_tmp}"' RETURN
+  # Self-clearing RETURN trap: deregister after firing so it does not leak into
+  # a caller function's scope (where ${stderr_tmp} would be unbound under `set -u`).
+  trap 'rm -f "${stderr_tmp}"; trap - RETURN' RETURN
 
   # If the caller exported GEMINI_STDIN_FILE, route it through run_with_timeout
   # so gemini reads large prompts from stdin (avoids ARG_MAX on big diffs).

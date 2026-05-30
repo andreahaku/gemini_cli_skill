@@ -1,17 +1,35 @@
 ---
 name: gemini
 description: >
-  Local Gemini CLI (3.1 Pro) for large-context analysis, multimodal reasoning, architecture
-  review. Use when user says /gemini, asks to consult Gemini, or when Gemini's strengths
-  (large context, grounded search) complement Claude's analysis.
+  Local Gemini for large-context analysis, multimodal reasoning, architecture
+  review. Runs on the Antigravity CLI (`agy`, Gemini 3.5 Flash) by default, with the
+  legacy `gemini` CLI as fallback. Use when user says /gemini, asks to consult Gemini,
+  or when Gemini's strengths (large context, grounded search) complement Claude's analysis.
 user-invocable: true
 argument-hint: "<prompt or review request>"
-compatibility: Requires Gemini CLI installed and authenticated.
+compatibility: Requires the Antigravity CLI (`agy`) or the legacy `gemini` CLI installed and authenticated.
 ---
 
 # Gemini
 
-Use the local `gemini` CLI directly (Gemini 3.1 Pro default). This skill leverages the full power of the Gemini CLI, including session persistence and safe planning modes.
+Use the local Gemini backend through the wrapper scripts. The skill auto-selects its backend (see below); the public flags and output shapes are identical regardless of which backend runs, so consumer skills (`/coordinate`, `/pr`, `/handover`, `/verify`, debate mode) need no changes.
+
+## Backends
+
+The wrappers resolve a backend via the `GEMINI_BACKEND` env var (default `auto`):
+
+| `GEMINI_BACKEND` | Backend | Model | Notes |
+|---|---|---|---|
+| `auto` *(default)* | `agy` if installed, else `gemini` | Gemini 3.5 Flash (agy) | Prefer the modern CLI |
+| `agy` | Antigravity CLI (`agy`) | Gemini 3.5 Flash (pinned default, auto-selected) | Required after 18/6/2026 when the legacy CLI stops serving the Google One AI Pro plan |
+| `gemini` | Legacy Gemini CLI (`gemini`) | auto → 3.1 Pro, 2.5 fallback | Needed for `--list` (session listing) and very large prompts |
+
+Key differences on the **agy** backend (handled transparently by the wrappers):
+- No per-call model flag — `--fast`/`--deep`/`--model` all resolve to the pinned Gemini 3.5 Flash default (output shape unchanged).
+- JSON output comes from the prompt instruction (`--structured` still works, prints clean JSON).
+- `--plan` is implicit (single-shot `--print` is non-interactive); `--yolo` maps to `--dangerously-skip-permissions`.
+- `--resume latest` → `agy -c`; `--resume <id>` → `agy --conversation <id>`. Numeric session indices have no agy mapping.
+- `--list` (session listing) is gemini-only and transparently falls back to the legacy CLI.
 
 ## Context
 
@@ -77,11 +95,11 @@ bash "${CLAUDE_SKILL_DIR}/scripts/gemini-review.sh" --uncommitted --prompt "Focu
 
 ## Depth Control
 
-Choose the depth level based on task complexity:
+Choose the depth level based on task complexity. **On the agy backend these flags resolve to the pinned Gemini 3.5 Flash default** (no per-call model override); the depth distinction below applies to the legacy `gemini` backend:
 
 - `--fast`: Uses `gemini-2.5-flash`. Best for quick lookups, simple questions, high-throughput tasks. Fast and lightweight.
-- *(default)*: Uses `auto` which resolves to Gemini 3.1 Pro. Good for most tasks.
-- `--deep`: Explicitly uses `pro` (Gemini 3.1 Pro). Best for complex architecture analysis, deep reasoning, security audits.
+- *(default)*: Uses `auto` (Gemini 3.5 Flash on agy, 3.1 Pro on gemini). Good for most tasks.
+- `--deep`: Explicitly uses `pro` (Gemini 3.1 Pro on gemini). Best for complex architecture analysis, deep reasoning, security audits.
 
 ```bash
 # Quick question
@@ -193,7 +211,8 @@ After receiving Gemini's response:
 
 ## Environment Variables
 
-- `GEMINI_SKILL_MODEL`: Override the default model (default: auto → Gemini 3.1 Pro). Use CLI aliases: `pro`, `flash`, `flash-lite`.
+- `GEMINI_BACKEND`: Backend selection — `auto` (default, prefer agy), `agy` (force Antigravity CLI / Gemini 3.5 Flash), or `gemini` (force legacy CLI). Use `gemini` when you specifically need 3.1 Pro depth or session listing.
+- `GEMINI_SKILL_MODEL`: Override the default model on the **gemini** backend (default: auto → Gemini 3.1 Pro). Use CLI aliases: `pro`, `flash`, `flash-lite`. Ignored on the agy backend (3.5 Flash is pinned).
 - `GEMINI_SKILL_APPROVAL`: Override the default approval policy.
 
 ## Worker Mode (for /coordinate and multi-agent orchestration)

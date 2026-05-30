@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/gemini-exec.sh"
+source "${SCRIPT_DIR}/agy-exec.sh"
+source "${SCRIPT_DIR}/backend-detect.sh"
 
 usage() {
   cat <<'EOF'
@@ -26,10 +28,9 @@ Environment:
 EOF
 }
 
-if ! command -v gemini >/dev/null 2>&1; then
-  echo "Gemini CLI not found. Install it first and make sure \`gemini\` is on PATH." >&2
-  exit 1
-fi
+# Resolve backend (auto|agy|gemini). resolve_backend errors out if the chosen
+# backend's CLI is missing, so no separate `command -v` check is needed.
+backend="$(resolve_backend)" || exit 1
 
 target=""
 custom_prompt=""
@@ -209,4 +210,16 @@ if (( prompt_bytes > LARGE_PROMPT_THRESHOLD )); then
   echo "[gemini-review] prompt size ${prompt_bytes}B > threshold ${LARGE_PROMPT_THRESHOLD}B — routing via stdin" >&2
 fi
 
-gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
+# Dispatch to the resolved backend. agy lacks --output-format/--approval-mode:
+# structured JSON comes from the prompt instruction already baked into
+# final_prompt, plan-mode is implicit in single-shot --print, and only yolo
+# needs translation (--dangerously-skip-permissions).
+if [[ "${backend}" == "agy" ]]; then
+  agy_args=(--print "${prompt_arg_for_p}")
+  if [[ "${approval_mode}" == "yolo" ]]; then
+    agy_args+=(--dangerously-skip-permissions)
+  fi
+  agy_exec "${agy_args[@]}"
+else
+  gemini_exec "${args[@]}" -p "${prompt_arg_for_p}"
+fi
