@@ -196,16 +196,10 @@ if [[ -n "${model}" ]]; then
   args+=(--model "${model}")
 fi
 
-# --- Level-A context compression (lossless; protects code blocks; no-op on small input) ---
-# Large review prompts are mostly diffs + logs — compress the noise (protects fenced code)
-# so big reviews fit and cost less. Best-effort: only replaces on non-empty output.
-_cc_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/compress-context.ts"
-if command -v bun >/dev/null 2>&1 && [[ -f "${_cc_script}" ]]; then
-  # `printf X` sentinel preserves trailing newlines that $() would otherwise strip.
-  _cc_out="$(printf '%s' "${final_prompt}" | bun "${_cc_script}" --skill gemini-review --guard 700000; printf X)"
-  _cc_out="${_cc_out%X}"
-  [[ -n "${_cc_out//[[:space:]]/}" ]] && final_prompt="${_cc_out}"
-fi
+# NOTE: the review path intentionally does NOT run Level-A compression. final_prompt carries
+# the raw git diff, which must stay byte-exact for an accurate review (trailing whitespace and
+# repeated +/- lines are semantically meaningful here). Oversized-diff reviews are a Level-B
+# (chunking) concern, not lossy Level-A compression. (Multi-model review finding — Codex.)
 
 # If the prompt exceeds the safe ARG_MAX threshold (mostly large diffs), route
 # it via stdin instead of -p. gemini concatenates stdin + -p, so -p "" works.
