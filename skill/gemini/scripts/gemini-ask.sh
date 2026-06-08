@@ -238,6 +238,19 @@ if [[ "${structured}" -eq 1 ]]; then
   done
 fi
 
+# --- Level-A context compression (lossless; protects code blocks; no-op on small input) ---
+# Shrinks noisy logs/output that make agy/gemini fail on oversized input. Runs BEFORE the
+# size check below, so a previously-too-large prompt may now fit. Best-effort: the prompt is
+# only replaced if compression produced non-empty output, so it can never drop it.
+_cc_script="${SCRIPT_DIR}/compress-context.ts"
+# Skip spawning bun entirely for small prompts (matches the script's own MIN_CHARS=2000).
+if [[ ${#prompt} -ge 2000 ]] && command -v bun >/dev/null 2>&1 && [[ -f "${_cc_script}" ]]; then
+  # `printf X` sentinel preserves trailing newlines that $() would otherwise strip.
+  _cc_out="$(printf '%s' "${prompt}" | bun "${_cc_script}" --skill gemini --guard 700000; printf X)"
+  _cc_out="${_cc_out%X}"
+  [[ -n "${_cc_out//[[:space:]]/}" ]] && prompt="${_cc_out}"
+fi
+
 # If the prompt exceeds the safe ARG_MAX threshold, route it via stdin instead
 # of the -p argument. gemini concatenates stdin + -p, so passing -p "" works.
 LARGE_PROMPT_THRESHOLD="${GEMINI_LARGE_PROMPT_THRESHOLD:-50000}"

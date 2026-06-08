@@ -196,6 +196,11 @@ if [[ -n "${model}" ]]; then
   args+=(--model "${model}")
 fi
 
+# NOTE: the review path intentionally does NOT run Level-A compression. final_prompt carries
+# the raw git diff, which must stay byte-exact for an accurate review (trailing whitespace and
+# repeated +/- lines are semantically meaningful here). Oversized-diff reviews are a Level-B
+# (chunking) concern, not lossy Level-A compression. (Multi-model review finding — Codex.)
+
 # If the prompt exceeds the safe ARG_MAX threshold (mostly large diffs), route
 # it via stdin instead of -p. gemini concatenates stdin + -p, so -p "" works.
 LARGE_PROMPT_THRESHOLD="${GEMINI_LARGE_PROMPT_THRESHOLD:-50000}"
